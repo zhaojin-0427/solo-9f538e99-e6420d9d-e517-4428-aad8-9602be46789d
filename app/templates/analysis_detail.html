@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>分析 #{{ row.id }} 详情 · 发酵罐温度质控</title>
+  <style>
+    :root { --line:#d8dee6; --bg:#f5f7fa; --ok:#1a7f37; --bad:#c0392b; --warn:#b7791f; --info:#1f6feb; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: "PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:#1f2933; }
+    header { background:#14385c; color:#fff; padding:18px 28px; }
+    header h1 { margin:0; font-size:20px; }
+    header p { margin:6px 0 0; font-size:13px; opacity:.8; }
+    nav { margin-top:10px; display:flex; gap:14px; font-size:13px; }
+    nav a { color:#cfe3ff; text-decoration:none; }
+    nav a:hover { text-decoration:underline; }
+    main { max-width:1180px; margin:22px auto; padding:0 18px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:20px; }
+    .card h2 { margin:0 0 12px; font-size:16px; color:#14385c; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { border-bottom:1px solid var(--line); padding:8px 10px; text-align:left; }
+    th { background:#f0f4f8; font-weight:600; white-space:nowrap; }
+    td.mono, .mono { font-family: ui-monospace,Menlo,Consolas,monospace; }
+    .muted { color:#7b8794; font-size:12px; }
+    .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; white-space:nowrap; }
+    .pill.current { background:#e7f5ec; color:var(--ok); }
+    .pill.stale, .pill.stale_history { background:#fdf6e3; color:var(--warn); }
+    .pill.superseded, .pill.rejected { background:#f1f3f5; color:#7b8794; }
+    .pill.must_keep { background:#e7f5ec; color:var(--ok); }
+    .pill.optional { background:#e8f0fe; color:var(--info); }
+    .pill.must_remove { background:#fdecea; color:var(--bad); }
+    .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; font-size:13px; }
+    .kv div { background:#f7f9fc; border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+    .kv b { display:block; font-size:16px; color:#14385c; margin-top:3px; }
+    .empty { color:#7b8794; padding:18px 0; text-align:center; }
+    code { background:#f0f4f8; padding:1px 5px; border-radius:4px; }
+    .plan { line-height:2; }
+    .plan .node { display:inline-block; padding:2px 10px; border-radius:999px; background:#e7f5ec; color:var(--ok);
+                  border:1px solid #b6dfc2; margin:2px 0; font-family:ui-monospace,Menlo,Consolas,monospace; }
+    tr.in-plan td { background:#f4faf6; }
+    .reason { background:#fdecea; border:1px solid #f0c4c0; color:var(--bad); border-radius:8px; padding:12px 14px; font-size:14px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>分析 #{{ row.id }} · 详情</h1>
+  <p>起始序号 <span class="mono">{{ row.start_seq }}</span> · 温变上限 <span class="mono">{{ row.limit_text }}</span> ℃/秒 · 生成于 <span class="mono">{{ row.created_at }}</span></p>
+  <nav>
+    <a href="{{ url_for('analysis_page') }}">← 返回分析页</a>
+    <a href="{{ url_for('index') }}">采集与记录</a>
+  </nav>
+</header>
+<main>
+  {% set state_label = {
+      'current': '当前结论', 'stale': '已过期（依据变化）',
+      'stale_history': '分析期间依据失效·仅历史', 'superseded': '已被新结论取代·历史',
+      'rejected': '分析被拒绝·历史' } %}
+  <p><span class="pill {{ row.state }}">{{ state_label.get(row.state, row.state) }}</span>
+     {% if row.reason %}<span class="muted" style="margin-left:8px">{{ row.reason }}</span>{% endif %}</p>
+
+  {% if row.status == 'rejected' %}
+    <div class="card">
+      <h2>拒绝原因</h2>
+      <div class="reason">{{ row.reason }}</div>
+      <p class="muted" style="margin-top:12px">该次分析未产生结论；参数版与拒绝时的采集水位已随本记录保存。</p>
+    </div>
+  {% elif payload %}
+    <div class="card">
+      <h2>结论概要（最少剔除方案）</h2>
+      <div class="kv">
+        <div>本批记录<b>{{ payload.n_input }} 条</b></div>
+        <div>最优保留<b>{{ payload.n_kept }} 条</b></div>
+        <div>最少剔除<b>{{ payload.n_removed }} 条</b></div>
+        <div>必留<b>{{ row.n_must_keep }} 条</b></div>
+        <div>可选<b>{{ row.n_optional }} 条</b></div>
+        <div>必剔<b>{{ row.n_must_remove }} 条</b></div>
+      </div>
+      <p class="muted" style="margin-top:12px">
+        判定基于原文温度的精确有理数比较（Fraction），未使用浮点容差；
+        约束：保留的相邻点 |Δ温| ≤ 上限 × 秒差。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>一组最优方案（保留序号序列，共 {{ payload.n_kept }} 条）</h2>
+      <div class="plan">
+        {% for s in payload.sample_plan_seqs %}<span class="node">{{ s }}</span>
+        {% if not loop.last %}<span class="muted"> → </span>{% endif %}{% endfor %}
+      </div>
+      <p class="muted">表中底色行即该方案保留的记录；同层“可选”点可相互替换，替换后仍为剔除最少的最优方案。</p>
+    </div>
+
+    <div class="card">
+      <h2>逐条标注（在所有最优方案中的地位）与记录来源</h2>
+      {% set cls_label = {'must_keep': '必留', 'optional': '可选', 'must_remove': '必剔'} %}
+      <table>
+        <thead><tr>
+          <th>批内位置</th><th>序号</th><th>时刻 ts(UTC)</th><th>温度原文</th>
+          <th>层</th><th>所有最优方案中</th><th>示例方案</th>
+          <th>来源文件</th><th>inode</th><th>原始行 raw</th>
+        </tr></thead>
+        <tbody>
+        {% for pt in payload.points %}
+          <tr class="{{ 'in-plan' if pt.in_sample_plan else '' }}">
+            <td class="mono">{{ pt.pos }}</td>
+            <td class="mono">{{ pt.seq }}</td>
+            <td class="mono">{{ pt.ts }}</td>
+            <td class="mono">{{ pt.temp_token }}</td>
+            <td class="mono">{{ pt.level if pt.classification != 'must_remove' else '—' }}</td>
+            <td><span class="pill {{ pt.classification }}">{{ cls_label.get(pt.classification) }}</span></td>
+            <td>{{ '保留' if pt.in_sample_plan else '剔除' }}</td>
+            <td class="mono">{{ pt.source_path }}</td>
+            <td class="mono">{{ pt.source_inode }}</td>
+            <td class="mono muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ pt.raw }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card"><div class="empty">该记录没有可展示的结果载荷。</div></div>
+  {% endif %}
+
+  <div class="card">
+    <h2>依据快照：参数版与采集水位</h2>
+    {% if watermark %}
+    <div class="kv">
+      <div>分析时记录总数<b>{{ watermark.record_count }}</b></div>
+      <div>分析时最大序号<b>{{ watermark.max_seq }}</b></div>
+      <div>最近成功采集轮次<b>#{{ watermark.last_ok_run_id or '—' }}</b></div>
+      <div>该轮时间(UTC)<b class="mono" style="font-size:13px">{{ watermark.last_ok_run_at or '—' }}</b></div>
+    </div>
+    <p class="muted" style="margin-top:10px">文件采集进度快照（inode / 偏移 / 大小）：</p>
+    {% if watermark.file_states %}
+    <table>
+      <thead><tr><th>路径</th><th>inode</th><th>偏移</th><th>观测大小</th><th>更新时间(UTC)</th></tr></thead>
+      <tbody>
+      {% for s in watermark.file_states %}
+        <tr><td class="mono">{{ s.path }}</td><td class="mono">{{ s.inode }}</td>
+            <td class="mono">{{ s.offset }}</td><td class="mono">{{ s.file_size }}</td>
+            <td class="mono">{{ s.updated_at }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">当时尚无文件采集进度</div>{% endif %}
+    {% else %}<div class="empty">未保存水位信息</div>{% endif %}
+    <p class="muted" style="margin-top:10px">
+      参数版：analysis_params 中 (start_seq={{ row.start_seq }}, limit={{ row.limit_text }}) 的唯一版本；
+      历史结果只追加、不改写，原始记录与采集进度不受分析影响。
+    </p>
+  </div>
+</main>
+</body>
+</html>

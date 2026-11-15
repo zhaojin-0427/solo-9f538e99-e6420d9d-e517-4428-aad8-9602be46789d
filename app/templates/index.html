@@ -44,6 +44,10 @@
 <header>
   <h1>发酵罐温度日志 · 质控记录</h1>
   <p>挂载目录：<code style="background:#234d75;color:#cfe3ff">{{ data_dir }}</code>　|　仅采集上次成功后新增的完整行，非法内容整轮拒绝</p>
+  <nav style="margin-top:10px;display:flex;gap:14px;font-size:13px">
+    <a style="color:#cfe3ff;text-decoration:none" href="{{ url_for('index') }}">采集与记录</a>
+    <a style="color:#cfe3ff;text-decoration:none" href="{{ url_for('analysis_page') }}">探头跳点分析 →</a>
+  </nav>
 </header>
 <main>
   {% with messages = get_flashed_messages(with_categories=true) %}
